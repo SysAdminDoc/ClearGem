@@ -1,6 +1,6 @@
 // ClearGem v1.0.3 — Content Script
 // Removes visible Gemini AI watermarks via reverse alpha blending
-// Uses crossOrigin Image + declarativeNetRequest CORS injection (no fetch needed)
+// Uses background service worker to bypass CORS for image fetching
 'use strict';
 
 (function () {
@@ -69,14 +69,46 @@
         }
     }
 
+    // ── Image Processing (from blob) ──
+    function processImageBlob(blob) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const w = img.naturalWidth;
+                const h = img.naturalHeight;
+                if (w < 96 || h < 96) { URL.revokeObjectURL(img.src); resolve(blob); return; }
+
+                const pos = getWatermarkPosition(w, h);
+                const alphaMap = decodeAlphaMap(pos.logoSize);
+                if (!alphaMap) { URL.revokeObjectURL(img.src); resolve(blob); return; }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                const imageData = ctx.getImageData(0, 0, w, h);
+                removeWatermark(imageData, alphaMap, pos);
+                ctx.putImageData(imageData, 0, 0);
+
+                canvas.toBlob(cleaned => {
+                    URL.revokeObjectURL(img.src);
+                    resolve(cleaned || blob);
+                }, blob.type || 'image/png');
+            };
+            img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('Image decode failed')); };
+            img.src = URL.createObjectURL(blob);
+        });
+    }
+
     // ── URL Detection ──
     function isGeminiImageUrl(url) {
         if (typeof url !== 'string' || !url.length) return false;
+        if (url.startsWith('blob:')) return false;
         try {
             const parsed = new URL(url);
             const host = parsed.hostname;
-            return (host === 'googleusercontent.com' || host.endsWith('.googleusercontent.com'))
-                && /^\/rd-[^/]+\//.test(parsed.pathname);
+            return (host === 'googleusercontent.com' || host.endsWith('.googleusercontent.com'));
         } catch { return false; }
     }
 
@@ -100,48 +132,28 @@
         } catch { return url; }
     }
 
-    // ── Load image via crossOrigin (CORS headers injected by declarativeNetRequest) ──
-    function loadCorsImage(url) {
+    // ── Background Fetch (service worker bypasses CORS via host_permissions) ──
+    function bgFetchBlob(url) {
         return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => resolve(img);
-            img.onerror = () => reject(new Error('Image load failed: ' + url.substring(0, 80)));
-            img.src = url;
-        });
-    }
-
-    // ── Process image URL → cleaned blob via canvas ──
-    function processImageUrl(url) {
-        return new Promise((resolve, reject) => {
-            loadCorsImage(url).then(img => {
-                const w = img.naturalWidth;
-                const h = img.naturalHeight;
-                if (w < 96 || h < 96) { reject(new Error('Image too small')); return; }
-
-                const pos = getWatermarkPosition(w, h);
-                const alphaMap = decodeAlphaMap(pos.logoSize);
-                if (!alphaMap) { reject(new Error('No alpha map for size ' + pos.logoSize)); return; }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-
-                try {
-                    const imageData = ctx.getImageData(0, 0, w, h);
-                    removeWatermark(imageData, alphaMap, pos);
-                    ctx.putImageData(imageData, 0, 0);
-                } catch (e) {
-                    reject(new Error('Canvas tainted — CORS headers not injected: ' + e.message));
+            console.log('[ClearGem] Requesting via BG:', url.substring(0, 80) + '...');
+            chrome.runtime.sendMessage({ type: 'cleargem-fetch', url }, resp => {
+                if (chrome.runtime.lastError) {
+                    console.error('[ClearGem] Runtime error:', chrome.runtime.lastError.message);
+                    reject(new Error(chrome.runtime.lastError.message));
                     return;
                 }
-
-                canvas.toBlob(blob => {
-                    resolve(blob || reject(new Error('toBlob failed')));
-                }, 'image/png');
-            }).catch(reject);
+                if (!resp || !resp.ok) {
+                    console.error('[ClearGem] BG fetch error:', resp?.error);
+                    reject(new Error(resp?.error || 'Background fetch failed'));
+                    return;
+                }
+                // Decode base64 response from background worker
+                const binary = atob(resp.data);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                console.log('[ClearGem] Received:', resp.type, bytes.length, 'bytes');
+                resolve(new Blob([bytes], { type: resp.type || 'image/png' }));
+            });
         });
     }
 
@@ -182,7 +194,9 @@
 
         try {
             const fullUrl = normalizeImageUrl(img.src);
-            const cleaned = await processImageUrl(fullUrl);
+            const blob = await bgFetchBlob(fullUrl);
+            if (!blob.type || !blob.type.startsWith('image/')) return;
+            const cleaned = await processImageBlob(blob);
             const blobUrl = URL.createObjectURL(cleaned);
 
             if (img.dataset.cleargemUrl) URL.revokeObjectURL(img.dataset.cleargemUrl);
@@ -278,7 +292,8 @@
             return resp.blob();
         }
         const src = img.dataset.cleargemOrigSrc || img.src;
-        return processImageUrl(normalizeImageUrl(src));
+        const blob = await bgFetchBlob(normalizeImageUrl(src));
+        return processImageBlob(blob);
     }
 
     document.addEventListener('click', async (e) => {
@@ -288,7 +303,9 @@
             e.preventDefault();
             e.stopPropagation();
             try {
-                const cleaned = await processImageUrl(normalizeImageUrl(anchor.href));
+                const blob = await bgFetchBlob(normalizeImageUrl(anchor.href));
+                if (!blob.type || !blob.type.startsWith('image/')) return;
+                const cleaned = await processImageBlob(blob);
                 triggerDownload(cleaned, anchor.download || 'gemini-image.png');
                 showToast('Downloaded clean image');
             } catch (err) {
