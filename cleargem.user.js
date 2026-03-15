@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ClearGem
 // @namespace    https://github.com/SysAdminDoc/ClearGem
-// @version      1.0.1
+// @version      1.0.2
 // @description  Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.
 // @author       SysAdminDoc
 // @match        https://gemini.google.com/*
@@ -22,7 +22,7 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
-    const VERSION = '1.0.1';
+    const VERSION = '1.0.2';
 
     // ── Embedded Alpha Maps (Float32Array as base64) ──
     const ALPHA_MAPS_B64 = {
@@ -231,6 +231,7 @@
             const blobUrl = URL.createObjectURL(cleaned);
 
             if (img.dataset.cleargemUrl) URL.revokeObjectURL(img.dataset.cleargemUrl);
+            img.dataset.cleargemOrigSrc = img.src;
             img.dataset.cleargemUrl = blobUrl;
             img.src = blobUrl;
             showToast('Watermark removed');
@@ -244,33 +245,161 @@
     }
 
     // ── Download Interception ──
+    // Gemini uses buttons (not <a> tags) for downloads. We detect them by
+    // aria-label, data attributes, icon content, and tooltip text.
+    function isDownloadButton(el) {
+        if (!el) return false;
+        // Gemini's download button: <download-generated-image-button> > button
+        const dlComponent = el.closest('download-generated-image-button');
+        if (dlComponent) return true;
+
+        const btn = el.closest('button, [role="button"]');
+        if (!btn) return false;
+
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        const tooltip = (btn.getAttribute('mattooltip') || '').toLowerCase();
+        const testId = btn.getAttribute('data-test-id') || '';
+
+        return testId === 'download-generated-image-button' ||
+               label.includes('download') || tooltip.includes('download');
+    }
+
+    function isCopyButton(el) {
+        if (!el) return false;
+        const copyComponent = el.closest('copy-button');
+        if (copyComponent) return true;
+
+        const btn = el.closest('button, [role="button"]');
+        if (!btn) return false;
+
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        return label.includes('copy image');
+    }
+
+    function findNearestGeminiImage(el) {
+        // Walk up from the button controls to find the associated image
+        // Structure: .generated-image-controls is a sibling/overlay on top of the image
+        const controls = el.closest('.generated-image-controls');
+        if (controls) {
+            // Look in the parent container for an img
+            const parent = controls.parentElement;
+            if (parent) {
+                const img = parent.querySelector('img');
+                if (img) return img;
+            }
+        }
+        // Try known container selectors
+        const containers = [
+            '.generated-image-container',
+            '[data-generation-id]',
+            'generated-image'
+        ];
+        for (const sel of containers) {
+            const container = el.closest(sel);
+            if (container) {
+                const img = container.querySelector('img');
+                if (img) return img;
+            }
+        }
+        // Fallback: walk up looking for img elements
+        let node = el.parentElement;
+        for (let i = 0; i < 10 && node; i++) {
+            const img = node.querySelector('img');
+            if (img && (img.dataset.cleargemUrl || isGeminiImageUrl(img.src) || img.src.startsWith('blob:'))) {
+                return img;
+            }
+            node = node.parentElement;
+        }
+        return null;
+    }
+
     document.addEventListener('click', async (e) => {
+        // Handle regular <a download> links
         const anchor = e.target.closest('a[download], a[href*="-d"]');
-        if (!anchor) return;
-        const href = anchor.href;
-        if (!isGeminiImageUrl(href)) return;
+        if (anchor && isGeminiImageUrl(anchor.href)) {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                const blob = await gmFetchBlob(normalizeImageUrl(anchor.href));
+                if (!blob.type || !blob.type.startsWith('image/')) return;
+                const cleaned = await processImageBlob(blob);
+                triggerDownload(cleaned, anchor.download || 'gemini-image.png');
+                showToast('Downloaded clean image');
+            } catch (err) {
+                console.warn('[ClearGem] Download interception error:', err);
+            }
+            return;
+        }
 
-        e.preventDefault();
-        e.stopPropagation();
+        // Handle Gemini's download button
+        if (isDownloadButton(e.target)) {
+            const img = findNearestGeminiImage(e.target);
+            if (!img) { console.warn('[ClearGem] Download button clicked but no image found'); return; }
 
-        try {
-            const blob = await gmFetchBlob(normalizeImageUrl(href));
-            if (!blob.type || !blob.type.startsWith('image/')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
 
-            const cleaned = await processImageBlob(blob);
-            const blobUrl = URL.createObjectURL(cleaned);
-            const dl = document.createElement('a');
-            dl.href = blobUrl;
-            dl.download = anchor.download || 'gemini-image.png';
-            document.body.appendChild(dl);
-            dl.click();
-            dl.remove();
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-            showToast('Downloaded clean image');
-        } catch (err) {
-            console.warn('[ClearGem] Download interception error:', err);
+            try {
+                let blob;
+                if (img.dataset.cleargemUrl) {
+                    // Already cleaned in-page — use that
+                    const resp = await fetch(img.dataset.cleargemUrl);
+                    blob = await resp.blob();
+                } else {
+                    // Not yet cleaned — fetch full-size and clean now
+                    const src = img.dataset.cleargemOrigSrc || img.src;
+                    const raw = await gmFetchBlob(normalizeImageUrl(src));
+                    blob = await processImageBlob(raw);
+                }
+                triggerDownload(blob, 'gemini-image.png');
+                showToast('Downloaded clean image');
+            } catch (err) {
+                console.warn('[ClearGem] Download error:', err);
+            }
+            return;
+        }
+
+        // Handle Gemini's copy button
+        if (isCopyButton(e.target)) {
+            const img = findNearestGeminiImage(e.target);
+            if (!img) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            try {
+                let blob;
+                if (img.dataset.cleargemUrl) {
+                    const resp = await fetch(img.dataset.cleargemUrl);
+                    blob = await resp.blob();
+                } else {
+                    const src = img.dataset.cleargemOrigSrc || img.src;
+                    const raw = await gmFetchBlob(normalizeImageUrl(src));
+                    blob = await processImageBlob(raw);
+                }
+                await navigator.clipboard.write([
+                    new ClipboardItem({ [blob.type]: blob })
+                ]);
+                showToast('Copied clean image');
+            } catch (err) {
+                console.warn('[ClearGem] Copy error:', err);
+            }
+            return;
         }
     }, true);
+
+    function triggerDownload(blob, filename) {
+        const blobUrl = URL.createObjectURL(blob);
+        const dl = document.createElement('a');
+        dl.href = blobUrl;
+        dl.download = filename;
+        document.body.appendChild(dl);
+        dl.click();
+        dl.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    }
 
     // ── MutationObserver ──
     let scanTimeout;
