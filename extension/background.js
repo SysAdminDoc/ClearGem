@@ -1,19 +1,21 @@
-// ClearGem v1.0.2 — Background Service Worker
+// ClearGem v1.0.3 — Background Service Worker
 // Proxies fetch requests from content script to bypass CORS
+// Extension service workers with host_permissions bypass CORS entirely
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type !== 'cleargem-fetch') return false;
 
-    console.log('[ClearGem BG] Fetching:', msg.url.substring(0, 80) + '...');
+    const url = msg.url;
+    console.log('[ClearGem BG] Fetching:', url.substring(0, 100));
 
-    fetch(msg.url, { redirect: 'follow' })
+    fetch(url)
         .then(resp => {
+            console.log('[ClearGem BG] Response:', resp.status, resp.statusText, 'type:', resp.type);
             if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
             const contentType = resp.headers.get('Content-Type') || 'image/png';
             return resp.arrayBuffer().then(buf => ({ buf, contentType }));
         })
         .then(({ buf, contentType }) => {
-            // Convert to base64 — far more efficient for message passing than a number array
             const bytes = new Uint8Array(buf);
             let binary = '';
             const chunkSize = 8192;
@@ -25,7 +27,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ ok: true, data: b64, type: contentType });
         })
         .catch(err => {
-            console.error('[ClearGem BG] Fetch error:', err.message);
+            console.error('[ClearGem BG] Fetch error:', err.message, 'URL:', url.substring(0, 100));
             sendResponse({ ok: false, error: err.message });
         });
 
