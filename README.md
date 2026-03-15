@@ -2,6 +2,17 @@
 
 Tampermonkey userscript that automatically removes the visible watermark from Google Gemini AI-generated images. Zero-click — just install and forget.
 
+<table>
+<tr>
+<td align="center"><strong>Before</strong></td>
+<td align="center"><strong>After</strong></td>
+</tr>
+<tr>
+<td><img src="before.png" alt="Gemini image with watermark" width="400"></td>
+<td><img src="after.png" alt="Gemini image with watermark removed" width="400"></td>
+</tr>
+</table>
+
 ## How It Works
 
 Gemini stamps a semi-transparent white 4-pointed star logo in the bottom-right corner of every generated image using alpha compositing:
