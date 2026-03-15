@@ -1,6 +1,6 @@
 // ClearGem v1.0.3 — Content Script
 // Removes visible Gemini AI watermarks via reverse alpha blending
-// CORS bypassed via declarativeNetRequest header injection
+// Uses crossOrigin Image + declarativeNetRequest CORS injection (no fetch needed)
 'use strict';
 
 (function () {
@@ -69,38 +69,6 @@
         }
     }
 
-    // ── Image Processing ──
-    function processImageBlob(blob) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                const w = img.naturalWidth;
-                const h = img.naturalHeight;
-                if (w < 96 || h < 96) { URL.revokeObjectURL(img.src); resolve(blob); return; }
-
-                const pos = getWatermarkPosition(w, h);
-                const alphaMap = decodeAlphaMap(pos.logoSize);
-                if (!alphaMap) { URL.revokeObjectURL(img.src); resolve(blob); return; }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                const imageData = ctx.getImageData(0, 0, w, h);
-                removeWatermark(imageData, alphaMap, pos);
-                ctx.putImageData(imageData, 0, 0);
-
-                canvas.toBlob(cleaned => {
-                    URL.revokeObjectURL(img.src);
-                    resolve(cleaned || blob);
-                }, blob.type || 'image/png');
-            };
-            img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('Image load failed')); };
-            img.src = URL.createObjectURL(blob);
-        });
-    }
-
     // ── URL Detection ──
     function isGeminiImageUrl(url) {
         if (typeof url !== 'string' || !url.length) return false;
@@ -132,11 +100,49 @@
         } catch { return url; }
     }
 
-    // ── Direct Fetch (CORS headers injected by declarativeNetRequest) ──
-    async function fetchImageBlob(url) {
-        const resp = await fetch(url, { mode: 'cors', redirect: 'follow' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
-        return resp.blob();
+    // ── Load image via crossOrigin (CORS headers injected by declarativeNetRequest) ──
+    function loadCorsImage(url) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('Image load failed: ' + url.substring(0, 80)));
+            img.src = url;
+        });
+    }
+
+    // ── Process image URL → cleaned blob via canvas ──
+    function processImageUrl(url) {
+        return new Promise((resolve, reject) => {
+            loadCorsImage(url).then(img => {
+                const w = img.naturalWidth;
+                const h = img.naturalHeight;
+                if (w < 96 || h < 96) { reject(new Error('Image too small')); return; }
+
+                const pos = getWatermarkPosition(w, h);
+                const alphaMap = decodeAlphaMap(pos.logoSize);
+                if (!alphaMap) { reject(new Error('No alpha map for size ' + pos.logoSize)); return; }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+
+                try {
+                    const imageData = ctx.getImageData(0, 0, w, h);
+                    removeWatermark(imageData, alphaMap, pos);
+                    ctx.putImageData(imageData, 0, 0);
+                } catch (e) {
+                    reject(new Error('Canvas tainted — CORS headers not injected: ' + e.message));
+                    return;
+                }
+
+                canvas.toBlob(blob => {
+                    resolve(blob || reject(new Error('toBlob failed')));
+                }, 'image/png');
+            }).catch(reject);
+        });
     }
 
     // ── Toast ──
@@ -175,9 +181,8 @@
         if (!isTarget) return;
 
         try {
-            const blob = await fetchImageBlob(normalizeImageUrl(img.src));
-            if (!blob.type || !blob.type.startsWith('image/')) return;
-            const cleaned = await processImageBlob(blob);
+            const fullUrl = normalizeImageUrl(img.src);
+            const cleaned = await processImageUrl(fullUrl);
             const blobUrl = URL.createObjectURL(cleaned);
 
             if (img.dataset.cleargemUrl) URL.revokeObjectURL(img.dataset.cleargemUrl);
@@ -273,8 +278,7 @@
             return resp.blob();
         }
         const src = img.dataset.cleargemOrigSrc || img.src;
-        const raw = await fetchImageBlob(normalizeImageUrl(src));
-        return processImageBlob(raw);
+        return processImageUrl(normalizeImageUrl(src));
     }
 
     document.addEventListener('click', async (e) => {
@@ -284,9 +288,7 @@
             e.preventDefault();
             e.stopPropagation();
             try {
-                const blob = await fetchImageBlob(normalizeImageUrl(anchor.href));
-                if (!blob.type || !blob.type.startsWith('image/')) return;
-                const cleaned = await processImageBlob(blob);
+                const cleaned = await processImageUrl(normalizeImageUrl(anchor.href));
                 triggerDownload(cleaned, anchor.download || 'gemini-image.png');
                 showToast('Downloaded clean image');
             } catch (err) {
