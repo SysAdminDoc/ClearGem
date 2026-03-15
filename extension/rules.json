@@ -14,7 +14,7 @@
     },
     "condition": {
       "urlFilter": "||googleusercontent.com",
-      "resourceTypes": ["xmlhttprequest"]
+      "resourceTypes": ["image", "xmlhttprequest"]
     }
   }
 ]
