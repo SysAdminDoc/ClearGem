@@ -1,6 +1,6 @@
 # ClearGem
 
-Browser extension (and userscript) that automatically removes the visible watermark from Google Gemini AI-generated images. Zero-click, 100% client-side, pixel-perfect reverse alpha blending.
+Automatically removes visible watermarks from Google Gemini AI-generated images. Available as a Tampermonkey userscript and a Chrome/Firefox extension. Zero-click — just install and forget.
 
 <table>
 <tr>
@@ -27,31 +27,46 @@ ClearGem reverses this mathematically to reconstruct the original pixels:
 original_pixel = (watermarked_pixel - alpha * 255) / (1 - alpha)
 ```
 
-Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly in the script. No AI inpainting, no server calls, no quality loss — pixel-perfect reconstruction with 99.9% accuracy (bounded only by 8-bit quantization).
+Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpainting, no server calls, no quality loss — pixel-perfect reconstruction with 99.9% accuracy (bounded only by 8-bit quantization).
 
 ## Features
 
 - **Zero-click** — images are cleaned automatically as they appear in chat
-- **Download interception** — download buttons deliver clean images
-- **Fetch interception** — cleans images at the network level before they render
+- **Download interception** — Gemini's download button delivers clean images
+- **Copy interception** — Gemini's copy button copies clean images to clipboard
 - **Auto-detection** — picks 48x48 or 96x96 watermark size based on image dimensions
 - **100% client-side** — nothing leaves your browser
 - **Toast notifications** — subtle confirmation when images are cleaned
 
 ## Install
 
+### Userscript (Tampermonkey / Greasemonkey)
+
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (or any userscript manager)
-2. Open `cleargem.user.js` and click "Install" / "Raw" — or create a new script in Tampermonkey and paste the contents
-3. Navigate to [gemini.google.com](https://gemini.google.com) — ClearGem is active immediately
+2. Download [`cleargem.user.js`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release — Tampermonkey will prompt to install
+3. Navigate to [gemini.google.com](https://gemini.google.com) — active immediately
+
+### Chrome Extension
+
+1. Download [`ClearGem-v1.0.2.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
+2. Go to `chrome://extensions`, enable **Developer mode**
+3. Click **Load unpacked** and select the unzipped folder
+
+Or drag the `.crx` file onto the extensions page.
+
+### Firefox Extension
+
+1. Download [`ClearGem-v1.0.2.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
+2. Go to `about:addons`, click the gear icon, select **Install Add-on From File**
 
 ## Compatibility
 
-| Site | Status |
-|------|--------|
-| gemini.google.com | Supported |
-| aistudio.google.com | Supported |
+| Site | Userscript | Extension |
+|------|:----------:|:---------:|
+| gemini.google.com | Yes | Yes |
+| aistudio.google.com | Yes | Yes |
 
-Works with Tampermonkey MV3 (`@inject-into content`).
+Userscript works with Tampermonkey MV3 (`@inject-into content`). Extension is Manifest V3.
 
 ## Limitations
 
