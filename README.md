@@ -1,6 +1,6 @@
 # ClearGem
 
-Tampermonkey userscript that automatically removes the visible watermark from Google Gemini AI-generated images. Zero-click — just install and forget.
+Browser extension (and userscript) that automatically removes the visible watermark from Google Gemini AI-generated images. Zero-click, 100% client-side, pixel-perfect reverse alpha blending.
 
 <table>
 <tr>
