@@ -1,0 +1,4 @@
+dist/
+*.pem
+gen_icons.py
+build_extension.py
