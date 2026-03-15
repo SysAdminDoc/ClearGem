@@ -48,7 +48,7 @@ Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpaint
 
 ### Chrome Extension
 
-1. Download [`ClearGem-v1.0.2.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
+1. Download [`ClearGem-v1.0.3.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
 2. Go to `chrome://extensions`, enable **Developer mode**
 3. Click **Load unpacked** and select the unzipped folder
 
@@ -56,7 +56,7 @@ Or drag the `.crx` file onto the extensions page.
 
 ### Firefox Extension
 
-1. Download [`ClearGem-v1.0.2.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
+1. Download [`ClearGem-v1.0.3.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
 2. Go to `about:addons`, click the gear icon, select **Install Add-on From File**
 
 ## Compatibility

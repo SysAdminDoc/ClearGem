@@ -1,5 +1,6 @@
-// ClearGem v1.0.2 — Content Script
+// ClearGem v1.0.3 — Content Script
 // Removes visible Gemini AI watermarks via reverse alpha blending
+// CORS bypassed via declarativeNetRequest header injection
 'use strict';
 
 (function () {
@@ -8,7 +9,7 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
-    const VERSION = '1.0.2';
+    const VERSION = '1.0.3';
 
     // ── Embedded Alpha Maps (Float32Array as base64) ──
     const ALPHA_MAPS_B64 = {
@@ -131,28 +132,11 @@
         } catch { return url; }
     }
 
-    // ── Background Fetch (bypasses CORS via service worker) ──
-    function bgFetchBlob(url) {
-        return new Promise((resolve, reject) => {
-            console.log('[ClearGem] Requesting:', url.substring(0, 80) + '...');
-            chrome.runtime.sendMessage({ type: 'cleargem-fetch', url }, resp => {
-                if (chrome.runtime.lastError) {
-                    console.error('[ClearGem] Message error:', chrome.runtime.lastError.message);
-                    reject(new Error(chrome.runtime.lastError.message));
-                    return;
-                }
-                if (!resp || !resp.ok) {
-                    console.error('[ClearGem] Fetch response error:', resp?.error);
-                    reject(new Error(resp?.error || 'Fetch failed'));
-                    return;
-                }
-                // Decode base64 response from background
-                const binary = atob(resp.data);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                resolve(new Blob([bytes], { type: resp.type || 'image/png' }));
-            });
-        });
+    // ── Direct Fetch (CORS headers injected by declarativeNetRequest) ──
+    async function fetchImageBlob(url) {
+        const resp = await fetch(url, { mode: 'cors', redirect: 'follow' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        return resp.blob();
     }
 
     // ── Toast ──
@@ -191,7 +175,7 @@
         if (!isTarget) return;
 
         try {
-            const blob = await bgFetchBlob(normalizeImageUrl(img.src));
+            const blob = await fetchImageBlob(normalizeImageUrl(img.src));
             if (!blob.type || !blob.type.startsWith('image/')) return;
             const cleaned = await processImageBlob(blob);
             const blobUrl = URL.createObjectURL(cleaned);
@@ -289,7 +273,7 @@
             return resp.blob();
         }
         const src = img.dataset.cleargemOrigSrc || img.src;
-        const raw = await bgFetchBlob(normalizeImageUrl(src));
+        const raw = await fetchImageBlob(normalizeImageUrl(src));
         return processImageBlob(raw);
     }
 
@@ -300,7 +284,7 @@
             e.preventDefault();
             e.stopPropagation();
             try {
-                const blob = await bgFetchBlob(normalizeImageUrl(anchor.href));
+                const blob = await fetchImageBlob(normalizeImageUrl(anchor.href));
                 if (!blob.type || !blob.type.startsWith('image/')) return;
                 const cleaned = await processImageBlob(blob);
                 triggerDownload(cleaned, anchor.download || 'gemini-image.png');
