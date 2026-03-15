@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         ClearGem
 // @namespace    https://github.com/SysAdminDoc/ClearGem
-// @version      1.0.0
+// @version      1.0.1
 // @description  Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.
 // @author       SysAdminDoc
 // @match        https://gemini.google.com/*
 // @match        https://aistudio.google.com/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @connect      googleusercontent.com
+// @connect      lh3.googleusercontent.com
 // @inject-into  content
 // @run-at       document-start
 // ==/UserScript==
@@ -19,7 +22,7 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
 
     // ── Embedded Alpha Maps (Float32Array as base64) ──
     const ALPHA_MAPS_B64 = {
@@ -142,6 +145,26 @@
         } catch { return url; }
     }
 
+    // ── GM_xmlhttpRequest Fetch (bypasses CORS) ──
+    function gmFetchBlob(url) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                responseType: 'blob',
+                onload: (resp) => {
+                    if (resp.status >= 200 && resp.status < 300) {
+                        resolve(resp.response);
+                    } else {
+                        reject(new Error(`GM fetch failed: ${resp.status}`));
+                    }
+                },
+                onerror: (err) => reject(new Error('GM fetch network error')),
+                ontimeout: () => reject(new Error('GM fetch timeout'))
+            });
+        });
+    }
+
     // ── Toast ──
     function showToast(msg) {
         const el = document.createElement('div');
@@ -162,26 +185,23 @@
         }, 2500);
     }
 
-    // ── Fetch Interception ──
-    const originalFetch = window.fetch;
-    window.fetch = async function (...args) {
+    // ── Fetch Interception (page context via unsafeWindow) ──
+    const pageWindow = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+    const originalFetch = pageWindow.fetch.bind(pageWindow);
+    pageWindow.fetch = async function (...args) {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
         if (!isGeminiImageUrl(url)) return originalFetch.apply(this, args);
 
         try {
             const normalized = normalizeImageUrl(url);
-            if (typeof args[0] === 'string') args[0] = normalized;
-            else if (args[0]?.url) args[0] = new Request(normalized, args[0]);
-
-            const response = await originalFetch.apply(this, args);
-            const blob = await response.clone().blob();
-            if (!blob.type.startsWith('image/')) return response;
-
+            const blob = await gmFetchBlob(normalized);
+            if (!blob.type || !blob.type.startsWith('image/')) {
+                return originalFetch.apply(this, args);
+            }
             const cleaned = await processImageBlob(blob);
             return new Response(cleaned, {
-                status: response.status,
-                statusText: response.statusText,
-                headers: response.headers
+                status: 200,
+                headers: { 'Content-Type': cleaned.type || 'image/png' }
             });
         } catch (e) {
             console.warn('[ClearGem] Fetch interception error:', e);
@@ -193,7 +213,7 @@
     const processed = new WeakSet();
 
     async function processImgElement(img) {
-        if (processed.has(img) || !img.src) return;
+        if (processed.has(img) || !img.src || img.src.startsWith('blob:')) return;
         if (img.naturalWidth === 0) {
             img.addEventListener('load', () => processImgElement(img), { once: true });
             return;
@@ -205,15 +225,15 @@
         if (!isTarget) return;
 
         try {
-            const resp = await originalFetch(normalizeImageUrl(img.src));
-            const blob = await resp.blob();
-            if (!blob.type.startsWith('image/')) return;
+            const blob = await gmFetchBlob(normalizeImageUrl(img.src));
+            if (!blob.type || !blob.type.startsWith('image/')) return;
             const cleaned = await processImageBlob(blob);
             const blobUrl = URL.createObjectURL(cleaned);
 
-            if (img.dataset.gweCleanUrl) URL.revokeObjectURL(img.dataset.gweCleanUrl);
-            img.dataset.gweCleanUrl = blobUrl;
+            if (img.dataset.cleargemUrl) URL.revokeObjectURL(img.dataset.cleargemUrl);
+            img.dataset.cleargemUrl = blobUrl;
             img.src = blobUrl;
+            showToast('Watermark removed');
         } catch (e) {
             console.warn('[ClearGem] Image element processing error:', e);
         }
@@ -234,9 +254,8 @@
         e.stopPropagation();
 
         try {
-            const resp = await originalFetch(normalizeImageUrl(href));
-            const blob = await resp.blob();
-            if (!blob.type.startsWith('image/')) return;
+            const blob = await gmFetchBlob(normalizeImageUrl(href));
+            if (!blob.type || !blob.type.startsWith('image/')) return;
 
             const cleaned = await processImageBlob(blob);
             const blobUrl = URL.createObjectURL(cleaned);
