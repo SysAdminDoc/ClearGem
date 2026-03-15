@@ -8,7 +8,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const url = msg.url;
     console.log('[ClearGem BG] Fetching:', url.substring(0, 100));
 
-    fetch(url)
+    fetch(url, { credentials: 'include', redirect: 'follow' })
         .then(resp => {
             console.log('[ClearGem BG] Response:', resp.status, resp.statusText, 'type:', resp.type);
             if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
