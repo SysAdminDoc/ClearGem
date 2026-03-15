@@ -134,16 +134,22 @@
     // ── Background Fetch (bypasses CORS via service worker) ──
     function bgFetchBlob(url) {
         return new Promise((resolve, reject) => {
+            console.log('[ClearGem] Requesting:', url.substring(0, 80) + '...');
             chrome.runtime.sendMessage({ type: 'cleargem-fetch', url }, resp => {
                 if (chrome.runtime.lastError) {
+                    console.error('[ClearGem] Message error:', chrome.runtime.lastError.message);
                     reject(new Error(chrome.runtime.lastError.message));
                     return;
                 }
                 if (!resp || !resp.ok) {
+                    console.error('[ClearGem] Fetch response error:', resp?.error);
                     reject(new Error(resp?.error || 'Fetch failed'));
                     return;
                 }
-                const bytes = new Uint8Array(resp.data);
+                // Decode base64 response from background
+                const binary = atob(resp.data);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                 resolve(new Blob([bytes], { type: resp.type || 'image/png' }));
             });
         });
