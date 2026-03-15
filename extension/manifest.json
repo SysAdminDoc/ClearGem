@@ -8,18 +8,12 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["declarativeNetRequestWithHostAccess"],
+  "permissions": [],
   "host_permissions": [
     "*://*.googleusercontent.com/*"
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "cors_rules",
-        "enabled": true,
-        "path": "rules.json"
-      }
-    ]
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
