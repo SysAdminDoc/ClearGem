@@ -1,18 +1,19 @@
-// ClearGem v1.0.8 — Content Script (ISOLATED world)
+// ClearGem v1.0.6 — Content Script (ISOLATED world)
 // Relays fetch requests from MAIN world to background service worker.
 'use strict';
 
 (function () {
-    // MAIN → ISOLATED → Background
+    const VERSION = '1.0.6';
+
     window.addEventListener('message', (e) => {
         if (e.source !== window || !e.data || e.data.type !== 'cleargem-fetch-request') return;
 
         const { id, url } = e.data;
-        console.log('[ClearGem Relay] Request:', url.substring(0, 80));
+        console.log('[ClearGem] Relay fetch:', url.substring(0, 80));
 
         chrome.runtime.sendMessage({ type: 'cleargem-fetch', url }, (resp) => {
             if (chrome.runtime.lastError) {
-                console.error('[ClearGem Relay] Error:', chrome.runtime.lastError.message);
+                console.error('[ClearGem] Relay error:', chrome.runtime.lastError.message);
                 window.postMessage({
                     type: 'cleargem-fetch-response',
                     id,
@@ -25,11 +26,12 @@
                 type: 'cleargem-fetch-response',
                 id,
                 ok: resp?.ok || false,
-                dataUrl: resp?.dataUrl,
+                data: resp?.data,
+                contentType: resp?.type,
                 error: resp?.error
             }, '*');
         });
     });
 
-    console.log('[ClearGem Relay] v1.0.8 content relay loaded');
+    console.log(`[ClearGem] v${VERSION} content relay loaded`);
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClearGem",
-  "version": "1.0.8",
+  "version": "1.0.6",
   "description": "Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.",
   "icons": {
     "16": "icons/icon16.png",
@@ -10,8 +10,7 @@
   },
   "permissions": [],
   "host_permissions": [
-    "*://*.googleusercontent.com/*",
-    "*://*.google.com/*"
+    "*://*.googleusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,18 +21,18 @@
         "https://gemini.google.com/*",
         "https://aistudio.google.com/*"
       ],
-      "js": ["intercept.js"],
+      "js": ["content.js"],
       "run_at": "document_start",
-      "world": "MAIN"
+      "world": "ISOLATED"
     },
     {
       "matches": [
         "https://gemini.google.com/*",
         "https://aistudio.google.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["intercept.js"],
       "run_at": "document_start",
-      "world": "ISOLATED"
+      "world": "MAIN"
     }
   ],
   "browser_specific_settings": {
