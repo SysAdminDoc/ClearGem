@@ -2,6 +2,8 @@
 // @name         ClearGem
 // @namespace    https://github.com/SysAdminDoc/ClearGem
 // @version      1.0.2
+// @updateURL      https://raw.githubusercontent.com/SysAdminDoc/ClearGem/main/cleargem.user.js
+// @downloadURL    https://raw.githubusercontent.com/SysAdminDoc/ClearGem/main/cleargem.user.js
 // @description  Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.
 // @author       SysAdminDoc
 // @match        https://gemini.google.com/*
