@@ -4,6 +4,12 @@
     "priority": 1,
     "action": {
       "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Origin",
+          "operation": "remove"
+        }
+      ],
       "responseHeaders": [
         {
           "header": "Access-Control-Allow-Origin",
@@ -14,7 +20,7 @@
     },
     "condition": {
       "urlFilter": "||googleusercontent.com",
-      "resourceTypes": ["image", "xmlhttprequest"]
+      "resourceTypes": ["xmlhttprequest", "image", "other"]
     }
   }
 ]
