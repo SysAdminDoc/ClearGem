@@ -3,3 +3,7 @@ dist/
 gen_icons.py
 build_extension.py
 CLAUDE.md
+
+# Markdown files local-only (except README)
+*.md
+!README.md
