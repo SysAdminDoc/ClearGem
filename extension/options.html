@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ClearGem Options</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1e1e2e; color: #cdd6f4;
+      min-width: 400px; padding: 24px;
+    }
+    h1 {
+      font-size: 20px; font-weight: 600;
+      margin-bottom: 4px; color: #b4befe;
+    }
+    .version { font-size: 12px; color: #6c7086; margin-bottom: 20px; }
+    .section {
+      background: #313244; border-radius: 8px;
+      padding: 16px; margin-bottom: 16px;
+    }
+    .section h2 {
+      font-size: 14px; font-weight: 600;
+      color: #a6adc8; margin-bottom: 12px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .option {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .option + .option { border-top: 1px solid #45475a; }
+    .option label { font-size: 14px; cursor: pointer; flex: 1; }
+    .option .desc {
+      font-size: 12px; color: #6c7086; margin-top: 2px;
+    }
+    /* Toggle switch */
+    .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; margin-left: 12px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: #45475a; border-radius: 12px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute;
+      width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: #cdd6f4; border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider { background: #b4befe; }
+    .toggle input:checked + .slider::before { transform: translateX(20px); }
+    /* Select */
+    select {
+      background: #45475a; color: #cdd6f4;
+      border: 1px solid #585b70; border-radius: 6px;
+      padding: 6px 10px; font-size: 13px;
+      cursor: pointer; margin-left: 12px;
+    }
+    select:focus { outline: none; border-color: #b4befe; }
+    /* Save indicator */
+    .saved {
+      position: fixed; bottom: 16px; right: 16px;
+      background: #a6e3a1; color: #1e1e2e;
+      padding: 8px 16px; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .saved.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>ClearGem</h1>
+  <div class="version">v1.1.0</div>
+
+  <div class="section">
+    <h2>Interception</h2>
+    <div class="option">
+      <div>
+        <label for="intercept-download">Intercept downloads</label>
+        <div class="desc">Clean watermark when using Gemini's download button</div>
+      </div>
+      <div class="toggle">
+        <input type="checkbox" id="intercept-download" checked>
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="option">
+      <div>
+        <label for="intercept-copy">Intercept copy</label>
+        <div class="desc">Clean watermark when using Gemini's copy button</div>
+      </div>
+      <div class="toggle">
+        <input type="checkbox" id="intercept-copy" checked>
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="option">
+      <div>
+        <label for="auto-clean">Auto-clean in page</label>
+        <div class="desc">Automatically clean images as they appear in chat</div>
+      </div>
+      <div class="toggle">
+        <input type="checkbox" id="auto-clean" checked>
+        <span class="slider"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Toast Notifications</h2>
+    <div class="option">
+      <div>
+        <label for="toast-enabled">Show toast notifications</label>
+        <div class="desc">Show confirmation when watermarks are removed</div>
+      </div>
+      <div class="toggle">
+        <input type="checkbox" id="toast-enabled" checked>
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="option">
+      <div>
+        <label for="toast-position">Toast position</label>
+      </div>
+      <select id="toast-position">
+        <option value="bottom-right">Bottom Right</option>
+        <option value="bottom-left">Bottom Left</option>
+        <option value="top-right">Top Right</option>
+        <option value="top-left">Top Left</option>
+      </select>
+    </div>
+    <div class="option">
+      <div>
+        <label for="toast-duration">Toast duration</label>
+      </div>
+      <select id="toast-duration">
+        <option value="1500">1.5s</option>
+        <option value="2500" selected>2.5s</option>
+        <option value="4000">4s</option>
+        <option value="6000">6s</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="saved" id="saved-indicator">Settings saved</div>
+
+  <script src="options.js"></script>
+</body>
+</html>

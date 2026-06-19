@@ -1,6 +1,6 @@
 # ClearGem
 
-![Version](https://img.shields.io/badge/version-v1.0.4-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Python-lightgrey)
+![Version](https://img.shields.io/badge/version-v1.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Python-lightgrey)
 
 Automatically removes visible watermarks from Google Gemini AI-generated images. Available as a Tampermonkey userscript and a Chrome/Firefox extension. Zero-click — just install and forget.
 
@@ -37,8 +37,10 @@ Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpaint
 - **Download interception** — Gemini's download button delivers clean images
 - **Copy interception** — Gemini's copy button copies clean images to clipboard
 - **Auto-detection** — picks 48x48 or 96x96 watermark size based on image dimensions
+- **Corner auto-detect** — scans all four corners to find the watermark, handles edge cases where Gemini places it in non-default positions
+- **Multi-site support** — works on Gemini, AI Studio, Vertex AI, and Google Labs
 - **100% client-side** — nothing leaves your browser
-- **Toast notifications** — subtle confirmation when images are cleaned
+- **Toast notifications** — subtle Shadow DOM-isolated confirmation when images are cleaned
 
 ## Install
 
@@ -50,7 +52,7 @@ Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpaint
 
 ### Chrome Extension
 
-1. Download [`ClearGem-v1.0.4.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
+1. Download [`ClearGem-v1.1.0.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
 2. Go to `chrome://extensions`, enable **Developer mode**
 3. Click **Load unpacked** and select the unzipped folder
 
@@ -58,7 +60,7 @@ Or drag the `.crx` file onto the extensions page.
 
 ### Firefox Extension
 
-1. Download [`ClearGem-v1.0.4.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
+1. Download [`ClearGem-v1.1.0.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
 2. Go to `about:addons`, click the gear icon, select **Install Add-on From File**
 
 ## Compatibility
@@ -67,6 +69,9 @@ Or drag the `.crx` file onto the extensions page.
 |------|:----------:|:---------:|
 | gemini.google.com | Yes | Yes |
 | aistudio.google.com | Yes | Yes |
+| console.cloud.google.com (Vertex AI) | Yes | Yes |
+| labs.google | Yes | Yes |
+| imagegeneration.vertex.ai | Yes | Yes |
 
 Userscript works with Tampermonkey MV3 (`@inject-into content`). Extension is Manifest V3.
 

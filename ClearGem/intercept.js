@@ -1,6 +1,6 @@
-// ClearGem v1.0.6 — MAIN World Fetch Interceptor
-// Runs in the page's JS context to intercept fetch() calls for generated images.
-// Communicates with the ISOLATED world content script via window.postMessage.
+// ClearGem v1.1.0 — MAIN World Image Processor
+// Fetches images via background SW relay (bypasses CORS via host_permissions).
+// Loads returned data URLs on canvas for watermark removal.
 'use strict';
 
 (function () {
@@ -8,6 +8,25 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
+
+    // ── Settings (relayed from ISOLATED world via content.js) ──
+    let settings = {
+        interceptDownload: true,
+        interceptCopy: true,
+        autoClean: true,
+        toastEnabled: true,
+        toastPosition: 'bottom-right',
+        toastDuration: 2500
+    };
+
+    window.addEventListener('message', (e) => {
+        if (e.source !== window || !e.data || e.data.type !== 'cleargem-settings') return;
+        Object.assign(settings, e.data.settings);
+        console.log('[ClearGem] Settings updated:', JSON.stringify(settings));
+    });
+
+    // Request settings on load
+    window.postMessage({ type: 'cleargem-get-settings' }, '*');
 
     const ALPHA_MAPS_B64 = {
         48: 'gYAAPIGAgDuBgIA7AAAAAAAAAAAAAAAAAAAAAIGAgDsAAAAAAAAAAAAAAAAAAAAAgYCAO4GAgDsAAAAAAAAAAIGAgDuBgIA7gYCAOwAAAAAAAAAAgYCAOwAAAADj4uI+4eDgPoGAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAgDuBgIA7gYAAPIGAgDuBgIA7gYAAPMHAQDyBgIA7gYCAO4GAgDuBgIA7gYAAPIGAgDvBwEA8gYAAPIGAgDuBgIA7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgYCAO4GAgDsAAAAAAAAAAAAAAAAAAAAAAAAAAIGAgDuBgIA7gYCAOwAAAAAAAAAAAAAAAIGAgDsAAAAAgYCAO4WEBD6BgAA/gYAAP4GAAD4AAAAAgYAAPAAAAACBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8wcBAPIGAgDuBgIA7gYCAOwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIGAgDsAAAAAgYCAO4GAADyBgAA8gYCAOwAAAAAAAAAAgYAAPIGAgDsAAAAAAAAAAIGAgDsAAAAAgYCAO5GQkD6BgAA/gYAAP5GQkD4AAAAAgYCAOwAAAACBgIA7gYCAO4GAgDuBgAA8gYAAPAAAAACBgAA8wcBAPMHAQDyBgIA7gYCAO4GAADyBgAA8gYAAPMHAQDyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAADwAAAAAAAAAAIGAgDsAAAAAAAAAAIGAgDsAAAAAgYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYCAO4GAgDsAAAAAgYCAO+Hg4D6BgAA/gYAAP/Hw8D4AAAAAgYCAO4GAgDuBgIA7gYAAPIGAgDuBgAA8wcBAPIGAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAADyBgAA8gYAAPIGAgDuBgIA7gYCAO4GAADyBgAA8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIGAgDsAAAAAAAAAAIGAgDuBgIA7AAAAAAAAAACBgIA7AAAAAAAAAAAAAAAAAAAAAIGAgDsAAAAAgYAAPoGAAD+BgAA/gYAAP4GAAD+BgAA+AAAAAAAAAACBgIA7gYAAPAAAAACBgAA8gYAAPIGAgDuBgIA7gYCAOwAAAADBwEA8wcBAPIGAADyBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7AAAAAIGAADwAAAAAAAAAAIGAgDsAAAAAgYCAO4GAgDuBgIA7gYCAOwAAAAAAAAAAgYCAOwAAAAAAAAAAAAAAAAAAAACBgIA7AAAAAAAAAACBgIA7oaCgPoGAAD+BgAA/gYAAP4GAAD/BwMA+AAAAAAAAAACBgIA7AAAAAIGAgDuBgAA8gYAAPAAAAACBgIA7gYCAO4GAgDuBgAA8wcBAPMHAQDzBwEA8gYCAO4GAgDsAAAAAAAAAAIGAgDuBgIA7gYCAOwAAAAAAAAAAAAAAAIGAgDsAAAAAwcBAPIGAgDuBgIA7gYCAOwAAAAAAAAAAgYCAO4GAgDuBgIA7gYAAPIGAADwAAAAAAAAAAIGAADyJiIg9gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYCAPQAAAACBgIA7AAAAAAAAAAAAAAAAgYCAO4GAADyBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7AAAAAAAAAAAAAAAAAAAAAIGAADwAAAAAgYCAO4GAADyBgIA7gYCAOwAAAAAAAAAAgYCAO8HAQDyBgIA7gYCAO4GAgDsAAAAAgYCAO4GAgDuhoKA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/o6KiPoGAgDuBgAA8AAAAAIGAgDuBgIA7gYCAO8HAQDyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPAAAAAAAAAAAgYCAO4GAADyBgIA7gYAAPIGAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgAA8gYCAO4GAADyBgAA8gYCAO4mIiD2BgAA/gYAAP4GAAD+CgQE/gYAAP4GAAD+BgAA/gYAAP4GAAD6BgAA8gYCAO4GAADwAAAAAgYCAO4GAADyBgIA7wcBAPIGAADyBgAA8wcBAPMHAQDzBwEA8gYAAPIGAADyBgIA7gYCAO4GAADyBgAA8gYCAOwAAAAAAAAAAgYCAO4GAgDuBgIA7AAAAAIGAADyBgIA7AAAAAIGAgDuBgIA7AAAAAIGAgDsAAAAAgYCAOwAAAACBgIA7gYCAO+Hg4D6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP8HAwD6BgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDvBwEA8wcBAPMHAQDyBgAA8wcBAPIGAADyBgIA7gYCAO4GAADyBgAA8gYAAPIGAgDsAAAAAAAAAAIGAgDuBgAA8AAAAAIGAgDuBgIA7AAAAAAAAAAAAAAAAgYAAPIGAgDuBgIA7gYAAPAAAAACBgIA7gYCAPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4GA+AAAAAAAAAACBgAA8gYAAPMHAQDyBgIA7gYAAPIGAADyBgIA7gYAAPIGAADyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7AAAAAAAAAACBgIA7AAAAAAAAAACBgIA7gYCAO8HAQDwAAAAAgYCAO4GAADwAAAAAgYAAPAAAAACBgAA8gYCAOwAAAACBgIA9gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/x8PA+wcDAPYGAgDuBgAA8wcBAPIGAADyBgAA8gYAAPIGAADwAAAAAgYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8gYAAPIGAgDuBgIA7gYCAOwAAAACBgIA7gYCAOwAAAAAAAAAAAAAAAIGAgDsAAAAAgYCAO4GAgDuBgIA7AAAAAMHAQDyBgAA8gYCAO4GAgD3h4OA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/4eDgPoGAAD2BgIA7gYCAOwAAAACBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAgDuBgAA8gYCAOwAAAACBgIA7AAAAAAAAAACBgIA7AAAAAIGAgDsAAAAAgYCAOwAAAACBgIA7gYCAO4GAgDuBgIA7gYCAO9PS0j6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP8HAwD6BgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAgDuBgAA8gYCAO4GAgDuBgIA7AAAAAAAAAACBgIA7AAAAAAAAAAAAAAAAAAAAAIGAgDsAAAAAgYAAPIGAgDuBgIA7o6KiPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+hoKA+gYCAOwAAAACBgIA7gYCAO4GAgDvBwEA8gYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8gYAAPIGAgDuBgIA7AAAAAAAAAAAAAAAAgYCAO4GAgDsAAAAAAAAAAIGAgDsAAAAAgYCAOwAAAAAAAAAAgYCAO4GAgDuhoKA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/oaCgPgAAAACBgIA7gYCAO4GAgDvBwEA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7AAAAAIGAADwAAAAAgYCAO4GAgDsAAAAAAAAAAIGAgDsAAAAAAAAAAAAAAACBgIA7gYAAPcHAwD6BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP9HQ0D6BgIA9gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7wcBAPIGAgDzBwEA8gYAAPAAAAACBgIA7gYCAOwAAAACBgIA7gYCAOwAAAACBgIA7gYCAO4GAgDuBgIA7AAAAAAAAAADBwMA94eDgPoGAAD+BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4OA+iYiIPYGAgDyBgAA8gYCAO4GAgDuBgIA7gYAAPIGAgDuBgAA8gYAAPIGAgDuBgIA7gYCAOwAAAAAAAAAAgYCAO4GAgDsAAAAAAAAAAIGAgDsAAAAAAAAAAOHgYD7x8PA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4WEhD6BgIA7gYCAO4GAADzBwEA8gYAAPMHAQDzBwEA8gYCAO4GAgDsAAAAAgYAAPIGAgDsAAAAAgYCAOwAAAAAAAAAAgYAAPIGAgDuBgAA+wcDAPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4OA+gYCAPYGAADzBwEA8gYAAPIGAADyBgAA8gYAAPIGAgDuBgIA7AAAAAIGAgDsAAAAAAAAAAAAAAAAAAAAAgYCAPaOioj6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP6GgoD6BgIA9gYAAPIGAgDuBgAA8gYAAPIGAgDuBgIA7AAAAAIGAgDsAAAAAgYCAO4WEBD7BwMA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/oaCgPoGAAD6BgIA7gYAAPIGAgDuBgIA7AAAAAIGAAD6RkJA+8fDwPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4OA+kZCQPoGAAD6BgIA84eDgPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/j4uI+4eDgPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4OA+gYCAO4GAAD6RkJA+4eDgPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/x8PA+kZCQPoGAAD6BgIA7gYCAO8HAQDwAAAAAgYCAO4GAAD6hoKA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/wcDAPoGAAD6BgAA8gYAAPIGAgDuBgIA7AAAAAIGAgDuBgIA7AAAAAAAAAACBgAA8gYCAPaOioj6BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4KBAT+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP6Oioj6JiIg9gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAADyBgIA7gYCAOwAAAAAAAAAAgYCAO4GAADyBgIA94eDgPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/BwMA+gYAAPoGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAOwAAAAAAAAAAAAAAAIGAgDsAAAAAgYCAO4GAgD6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/8/LyPuXkZD6BgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDsAAAAAgYCAOwAAAACBgIA7AAAAAAAAAAAAAAAAgYAAPAAAAACBgIA94+LiPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+CgQE/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD/h4OA+wcDAPYGAgDuBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDsAAAAAgYCAOwAAAACBgIA7AAAAAIGAgDsAAAAAAAAAAAAAAAAAAAAAgYCAPdHQ0D6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP8HAwD6BgAA9gYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAADyBgIA7gYCAO4GAgDsAAAAAAAAAAAAAAAAAAAAAgYCAO4GAgDuhoKA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4KBAT+CgQE/gYAAP4GAAD+BgAA/oaCgPsHAQDzBwEA8gYAAPIGAgDuBgAA8gYAAPIGAgDuBgIA7wcBAPMHAQDyBgAA8gYAAPIGAgDsAAAAAgYCAO4GAgDsAAAAAgYCAO4GAgDuBgIA7gYCAOwAAAAAAAAAAAAAAAAAAAACBgIA7gYCAO4GAADyBgIA7oaCgPoGAAD+BgAA/goEBP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4KBAT+CgQE/gYAAP4GAAD+hoKA+gYCAO4GAgDyBgIA8gYAAPIGAADyBgAA8gYAAPIGAgDuBgIA7wcBAPMHAQDyBgIA7gYAAPIGAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgAA8wcBAPMHAQDyBgAA8gYAAPIGAADyBgAA8gYCAO4GAgDuBgIA7gYCAO8PCwj6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP9HQ0D6BgAA8gYAAPMHAQDzBwEA8gYCAOwAAAACBgIA7gYAAPIGAADyBgAA8wcBAPMHAQDyBgIA7gYCAO8HAQDzBwEA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAPMHAQDyBgAA8wcBAPIGAADzBwEA8gYCAO4GAgDuBgIA7gYCAO6GgID3j4uI+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/goEBP4GAAD+BgAA/gYAAP4GAAD+BgAA/4eDgPoGAgD2BgAA8wcBAPMHAQDzBwEA8gYCAO4GAgDuBgIA7gYAAPIGAADyBgAA8gYCAPMHAQDwAAAAAgYCAO8HAQDzBwEA8gYAAPIGAADyBgAA8gYCAO4GAADyBgAA8AAAAAAAAAACBgAA8wcBAPIGAADzBwEA8gYAAPIGAADwAAAAAgYCAO4GAADzJyMg98fDwPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYCAPQAAAACBgAA8gYAAPAAAAAAAAAAAgYCAO4GAgDuBgAA8wcBAPIGAADyBgIA7AAAAAAAAAACBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgAA8gYAAPMHAQDyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAADyBgAA8gYAAPIGAADyBgIA7gYCAO4GAADyBgAA84eBgPoGAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgIA+gYCAO4GAgDvBwEA8gYAAPIGAgDsAAAAAgYCAO4GAgDvBwEA8wcBAPIGAgDuBgAA8gYCAOwAAAAAAAAAAAAAAAIGAgDuBgIA7gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7AAAAAIGAgDuBgAA8gYAAPIGAADyBgAA8AAAAAMHAwD6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP+Hg4D6BgIA7gYCAO4GAgDuBgAA8gYAAPAAAAACBgAA8gYCAO4GAgDuBgAA8gYCAO4GAgDsAAAAAgYCAOwAAAAAAAAAAgYCAO4GAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPMHAQDyBgAA8gYCAO4GAAD6BgAA/gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYAAP4GAgD2BgIA7gYCAOwAAAACBgAA8gYAAPIGAgDuBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPAAAAAAAAAAAgYCAOwAAAACBgAA8gYAAPIGAADyBgIA7gYCAOwAAAAChoKA+gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/oaCgPoGAgDuBgIA7gYCAO4GAgDuBgAA8wcBAPAAAAACBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPAAAAACBgIA7gYCAO4GAADyBgAA8gYAAPIGAgDuBgIA7AAAAAIGAgDuBgIA9gYAAP4GAAD+BgAA/gYAAP4GAAD+BgAA/gYCAPYGAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAADyBgAA8gYCAO4GAgDuBgIA7gYAAPIGAgDuBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDsAAAAAw8LCPoKBAT+CgQE/gYAAP4GAAD+hoKA+gYCAO4GAADyBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAADyBgAA8gYCAO4GAgDuBgIA7gYCAO4GAgDsAAAAAgYAAPIGAADyBgIA7AAAAAIGAgDuBgIA7gYAAPMHAQDyBgIA7gYAAPoKBAT+BgAA/gYAAP4GAAD+BgAA+gYCAO4GAADyBgAA8AAAAAIGAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAgDuBgIA7gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgAA8gYAAPAAAAAAAAAAAgYAAPIGAADyBgIA7gYCAO/Py8j6BgAA/gYAAP+Hg4D6BgIA7gYCAO4GAADzBwEA8gYCAO4GAgDuBgAA8gYAAPAAAAAAAAAAAgYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAgDsAAAAAgYAAPIGAADyBgIA7gYCAO4GAgDuBgIA7gYAAPIGAADyBgAA8gYAAPIGAgDuBgIA7gYAAPIGAADyBgIA7gYCAO5OSkj6BgAA/gYAAP5OSkj6BgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgIA7gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgAA8gYCAO4GAADyBgIA7AAAAAIGAgDvBwEA8wcBAPIGAgDsAAAAAgYCAO4GAgDuBgAA8gYAAPIGAAD6BgAA/gYAAP4WEBD6BgIA7gYCAO4GAADyBgAA8gYAAPIGAADwAAAAAgYCAOwAAAACBgIA7gYAAPIGAADyBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7gYCAO4GAgDuBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgIA7AAAAAIGAgDuBgIA7gYCAO4GAgDuBgIA7gYAAPIGAgDuBgIA7gYCAOwAAAADBwEA8gYAAPIGAgDvh4OA+4eDgPoGAgDuBgIA7gYCAO4GAADyBgAA8gYAAPIGAADyBgIA7AAAAAIGAgDsAAAAAgYAAPIGAADyBgIA7gYCAO4GAADyBgAA8gYCAO4GAgDuBgAA8gYAAPIGAgDuBgIA7',
@@ -28,17 +47,60 @@
         return new Float32Array(floats);
     }
 
-    function getWatermarkPosition(imgW, imgH) {
+    function getCandidatePositions(imgW, imgH) {
         const large = imgW > 1024 && imgH > 1024;
         const logoSize = large ? 96 : 48;
         const margin = large ? 64 : 32;
-        return {
-            x: imgW - margin - logoSize,
-            y: imgH - margin - logoSize,
-            width: logoSize,
-            height: logoSize,
-            logoSize
-        };
+        return [
+            { x: imgW - margin - logoSize, y: imgH - margin - logoSize, width: logoSize, height: logoSize, logoSize, corner: 'bottom-right' },
+            { x: margin,                   y: imgH - margin - logoSize, width: logoSize, height: logoSize, logoSize, corner: 'bottom-left'  },
+            { x: imgW - margin - logoSize, y: margin,                   width: logoSize, height: logoSize, logoSize, corner: 'top-right'    },
+            { x: margin,                   y: margin,                   width: logoSize, height: logoSize, logoSize, corner: 'top-left'     }
+        ];
+    }
+
+    function scoreCorner(imageData, alphaMap, pos) {
+        const { x, y, width, height } = pos;
+        const imgW = imageData.width;
+        const imgH = imageData.height;
+        if (x < 0 || y < 0 || x + width > imgW || y + height > imgH) return -1;
+        let sumProduct = 0;
+        let sumAlpha = 0;
+        let count = 0;
+        for (let row = 0; row < height; row++) {
+            for (let col = 0; col < width; col++) {
+                const alphaIdx = row * width + col;
+                const rawAlpha = alphaMap[alphaIdx];
+                if (rawAlpha < ALPHA_THRESHOLD) continue;
+                const imgIdx = ((y + row) * imgW + (x + col)) * 4;
+                const r = imageData.data[imgIdx];
+                const g = imageData.data[imgIdx + 1];
+                const b = imageData.data[imgIdx + 2];
+                const brightness = (r + g + b) / 3 / 255;
+                sumProduct += rawAlpha * brightness;
+                sumAlpha += rawAlpha;
+                count++;
+            }
+        }
+        if (count === 0 || sumAlpha === 0) return -1;
+        return sumProduct / sumAlpha;
+    }
+
+    function getWatermarkPosition(imgW, imgH, imageData) {
+        const candidates = getCandidatePositions(imgW, imgH);
+        if (!imageData) return candidates[0];
+        const alphaMap = decodeAlphaMap(candidates[0].logoSize);
+        if (!alphaMap) return candidates[0];
+        let bestPos = candidates[0];
+        let bestScore = -1;
+        for (const pos of candidates) {
+            const score = scoreCorner(imageData, alphaMap, pos);
+            if (score > bestScore) {
+                bestScore = score;
+                bestPos = pos;
+            }
+        }
+        return bestPos;
     }
 
     function removeWatermark(imageData, alphaMap, pos) {
@@ -59,37 +121,6 @@
                 }
             }
         }
-    }
-
-    function processImageBlob(blob) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                const w = img.naturalWidth;
-                const h = img.naturalHeight;
-                if (w < 96 || h < 96) { URL.revokeObjectURL(img.src); resolve(blob); return; }
-
-                const pos = getWatermarkPosition(w, h);
-                const alphaMap = decodeAlphaMap(pos.logoSize);
-                if (!alphaMap) { URL.revokeObjectURL(img.src); resolve(blob); return; }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                const imageData = ctx.getImageData(0, 0, w, h);
-                removeWatermark(imageData, alphaMap, pos);
-                ctx.putImageData(imageData, 0, 0);
-
-                canvas.toBlob(cleaned => {
-                    URL.revokeObjectURL(img.src);
-                    resolve(cleaned || blob);
-                }, blob.type || 'image/png');
-            };
-            img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('Image decode failed')); };
-            img.src = URL.createObjectURL(blob);
-        });
     }
 
     function isGeminiImageUrl(url) {
@@ -121,64 +152,130 @@
         } catch { return url; }
     }
 
-    // ── Fetch via background service worker (through isolated world relay) ──
-    let reqId = 0;
-    const pending = new Map();
+    // ── Relay fetch via content script → background SW ──
+    const pendingFetches = new Map();
+    let fetchIdCounter = 0;
 
     window.addEventListener('message', (e) => {
         if (e.source !== window || !e.data || e.data.type !== 'cleargem-fetch-response') return;
-        const cb = pending.get(e.data.id);
-        if (!cb) return;
-        pending.delete(e.data.id);
-        cb(e.data);
+        const { id, ok, dataUrl, error } = e.data;
+        const pending = pendingFetches.get(id);
+        if (!pending) return;
+        pendingFetches.delete(id);
+        if (ok && dataUrl) {
+            pending.resolve(dataUrl);
+        } else {
+            pending.reject(new Error(error || 'Fetch failed'));
+        }
     });
 
-    function bgFetchBlob(url) {
+    function relayFetch(url) {
         return new Promise((resolve, reject) => {
-            const id = ++reqId;
+            const id = ++fetchIdCounter;
             const timeout = setTimeout(() => {
-                pending.delete(id);
-                reject(new Error('BG fetch timeout'));
+                pendingFetches.delete(id);
+                reject(new Error('Relay fetch timeout'));
             }, 15000);
-
-            pending.set(id, (resp) => {
-                clearTimeout(timeout);
-                if (!resp.ok) {
-                    reject(new Error(resp.error || 'BG fetch failed'));
-                    return;
-                }
-                const binary = atob(resp.data);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                resolve(new Blob([bytes], { type: resp.contentType || 'image/png' }));
+            pendingFetches.set(id, {
+                resolve: (v) => { clearTimeout(timeout); resolve(v); },
+                reject: (e) => { clearTimeout(timeout); reject(e); }
             });
-
-            window.postMessage({
-                type: 'cleargem-fetch-request',
-                id,
-                url
-            }, '*');
+            window.postMessage({ type: 'cleargem-fetch-request', id, url }, '*');
         });
     }
 
-    // ── Toast ──
-    function showToast(msg) {
-        const el = document.createElement('div');
-        el.textContent = msg;
-        Object.assign(el.style, {
-            position: 'fixed', bottom: '24px', right: '24px', zIndex: '999999',
-            background: '#1a1a2e', color: '#cdd6f4', padding: '12px 20px',
-            borderRadius: '8px', fontSize: '13px', fontFamily: 'system-ui, sans-serif',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)', opacity: '0',
-            transition: 'opacity 0.3s ease', pointerEvents: 'none',
-            border: '1px solid rgba(205,214,244,0.1)'
+    // ── Load data URL as Image and process on canvas ──
+    function loadImage(src) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('Image load failed'));
+            img.src = src;
         });
-        document.body.appendChild(el);
+    }
+
+    function processOnCanvas(img) {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        if (w < 96 || h < 96) return null;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const pos = getWatermarkPosition(w, h, imageData);
+        const alphaMap = decodeAlphaMap(pos.logoSize);
+        if (!alphaMap) return null;
+
+        removeWatermark(imageData, alphaMap, pos);
+        ctx.putImageData(imageData, 0, 0);
+        return canvas;
+    }
+
+    // ── Toast (Shadow DOM isolated, settings-aware) ──
+    let toastHost = null;
+    let toastShadow = null;
+
+    function getToastPositionCSS() {
+        const pos = settings.toastPosition || 'bottom-right';
+        const map = {
+            'bottom-right': 'bottom: 24px; right: 24px;',
+            'bottom-left':  'bottom: 24px; left: 24px;',
+            'top-right':    'top: 24px; right: 24px;',
+            'top-left':     'top: 24px; left: 24px;'
+        };
+        return map[pos] || map['bottom-right'];
+    }
+
+    function ensureToastHost() {
+        if (toastHost && document.body.contains(toastHost)) return;
+        toastHost = document.createElement('cleargem-toast-host');
+        toastHost.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;z-index:999999;pointer-events:none;';
+        toastShadow = toastHost.attachShadow({ mode: 'closed' });
+        const style = document.createElement('style');
+        style.textContent = `
+            :host { all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 999999; pointer-events: none; }
+            .cleargem-toast {
+                position: fixed;
+                background: #1a1a2e; color: #cdd6f4; padding: 12px 20px;
+                border-radius: 8px; font-size: 13px; font-family: system-ui, sans-serif;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5); opacity: 0;
+                transition: opacity 0.3s ease; pointer-events: none;
+                border: 1px solid rgba(205,214,244,0.1);
+            }
+        `;
+        toastShadow.appendChild(style);
+        document.body.appendChild(toastHost);
+    }
+
+    function showToast(msg) {
+        if (!settings.toastEnabled) return;
+        ensureToastHost();
+        const el = document.createElement('div');
+        el.className = 'cleargem-toast';
+        el.style.cssText = getToastPositionCSS();
+        el.textContent = msg;
+        toastShadow.appendChild(el);
         requestAnimationFrame(() => { el.style.opacity = '1'; });
+        const duration = settings.toastDuration || 2500;
         setTimeout(() => {
             el.style.opacity = '0';
             setTimeout(() => el.remove(), 300);
-        }, 2500);
+        }, duration);
+    }
+
+    // ── Core: fetch via SW relay, process, return blob ──
+    async function fetchAndProcess(url) {
+        const normalized = normalizeImageUrl(url);
+        console.log('[ClearGem] Relay fetch:', normalized.substring(0, 80));
+        const dataUrl = await relayFetch(normalized);
+        const img = await loadImage(dataUrl);
+        const canvas = processOnCanvas(img);
+        if (!canvas) return null;
+        return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     }
 
     // ── Fetch Interception ──
@@ -189,19 +286,15 @@
 
         console.log('[ClearGem] Intercepting fetch:', url.substring(0, 80));
         try {
-            const normalized = normalizeImageUrl(url);
-            const blob = await bgFetchBlob(normalized);
-            if (!blob.type || !blob.type.startsWith('image/')) {
-                return originalFetch.apply(this, args);
-            }
-            const cleaned = await processImageBlob(blob);
+            const blob = await fetchAndProcess(url);
+            if (!blob) return originalFetch.apply(this, args);
             showToast('Watermark removed');
-            return new Response(cleaned, {
+            return new Response(blob, {
                 status: 200,
-                headers: { 'Content-Type': cleaned.type || 'image/png' }
+                headers: { 'Content-Type': 'image/png' }
             });
         } catch (e) {
-            console.warn('[ClearGem] Fetch interception error:', e);
+            console.warn('[ClearGem] Fetch interception error:', e.message);
             return originalFetch.apply(this, args);
         }
     };
@@ -270,27 +363,11 @@
     }
 
     async function getCleanBlob(img) {
-        const src = img.src;
-        if (src.startsWith('blob:') || src.startsWith('data:')) {
-            // Process directly from the DOM element
-            const w = img.naturalWidth;
-            const h = img.naturalHeight;
-            if (w < 96 || h < 96) return null;
-            const pos = getWatermarkPosition(w, h);
-            const alphaMap = decodeAlphaMap(pos.logoSize);
-            if (!alphaMap) return null;
-            const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            const imageData = ctx.getImageData(0, 0, w, h);
-            removeWatermark(imageData, alphaMap, pos);
-            ctx.putImageData(imageData, 0, 0);
-            return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const src = img.dataset.cleargemOrigSrc || img.src;
+        if (isGeminiImageUrl(src)) {
+            return fetchAndProcess(src);
         }
-        const blob = await bgFetchBlob(normalizeImageUrl(src));
-        return processImageBlob(blob);
+        return null;
     }
 
     document.addEventListener('click', async (e) => {
@@ -299,18 +376,18 @@
             e.preventDefault();
             e.stopPropagation();
             try {
-                const blob = await bgFetchBlob(normalizeImageUrl(anchor.href));
-                if (!blob.type || !blob.type.startsWith('image/')) return;
-                const cleaned = await processImageBlob(blob);
-                triggerDownload(cleaned, anchor.download || 'gemini-image.png');
-                showToast('Downloaded clean image');
+                const blob = await fetchAndProcess(anchor.href);
+                if (blob) {
+                    triggerDownload(blob, anchor.download || 'gemini-image.png');
+                    showToast('Downloaded clean image');
+                }
             } catch (err) {
                 console.warn('[ClearGem] Download error:', err);
             }
             return;
         }
 
-        if (isDownloadButton(e.target)) {
+        if (settings.interceptDownload && isDownloadButton(e.target)) {
             const img = findNearestGeminiImage(e.target);
             if (!img) return;
             e.preventDefault();
@@ -328,7 +405,7 @@
             return;
         }
 
-        if (isCopyButton(e.target)) {
+        if (settings.interceptCopy && isCopyButton(e.target)) {
             const img = findNearestGeminiImage(e.target);
             if (!img) return;
             e.preventDefault();
@@ -353,7 +430,8 @@
     const processed = new WeakSet();
 
     async function processImgElement(img) {
-        if (processed.has(img) || !img.src || img.src.startsWith('blob:')) return;
+        if (!settings.autoClean) return;
+        if (processed.has(img) || !img.src || img.src.startsWith('blob:') || img.src.startsWith('data:')) return;
         if (img.naturalWidth === 0) {
             img.addEventListener('load', () => processImgElement(img), { once: true });
             return;
@@ -364,19 +442,20 @@
             img.closest('.generated-image-container, [data-generation-id], generated-image');
         if (!isTarget) return;
 
-        try {
-            const blob = await bgFetchBlob(normalizeImageUrl(img.src));
-            if (!blob.type || !blob.type.startsWith('image/')) return;
-            const cleaned = await processImageBlob(blob);
-            const blobUrl = URL.createObjectURL(cleaned);
+        console.log('[ClearGem] Processing image:', img.src.substring(0, 80));
 
+        try {
+            const blob = await fetchAndProcess(img.src);
+            if (!blob) return;
+
+            const blobUrl = URL.createObjectURL(blob);
             if (img.dataset.cleargemUrl) URL.revokeObjectURL(img.dataset.cleargemUrl);
             img.dataset.cleargemOrigSrc = img.src;
             img.dataset.cleargemUrl = blobUrl;
             img.src = blobUrl;
             showToast('Watermark removed');
         } catch (e) {
-            console.warn('[ClearGem] Image element processing error:', e);
+            console.warn('[ClearGem] Image processing error:', e.message);
         }
     }
 
@@ -385,14 +464,33 @@
     }
 
     let scanTimeout;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((mutations) => {
         clearTimeout(scanTimeout);
         scanTimeout = setTimeout(scanImages, 150);
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                const imgs = node.tagName === 'IMG' ? [node] : (node.querySelectorAll ? Array.from(node.querySelectorAll('img')) : []);
+                for (const img of imgs) {
+                    intersectionObs.observe(img);
+                }
+            }
+        }
     });
+
+    const intersectionObs = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting && entry.target.tagName === 'IMG') {
+                processImgElement(entry.target);
+                intersectionObs.unobserve(entry.target);
+            }
+        }
+    }, { rootMargin: '200px' });
 
     function init() {
         if (document.body) {
             observer.observe(document.body, { childList: true, subtree: true });
+            document.querySelectorAll('img').forEach(img => intersectionObs.observe(img));
             scanImages();
         } else {
             document.addEventListener('DOMContentLoaded', init);
@@ -400,5 +498,5 @@
     }
 
     init();
-    console.log('[ClearGem] MAIN world interceptor loaded');
+    console.log('[ClearGem] v1.1.0 interceptor loaded');
 })();

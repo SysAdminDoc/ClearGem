@@ -1,17 +1,23 @@
 {
   "manifest_version": 3,
   "name": "ClearGem",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "description": "Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": [],
+  "permissions": ["storage"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "host_permissions": [
     "*://*.googleusercontent.com/*",
-    "*://*.google.com/*"
+    "*://*.google.com/*",
+    "*://*.google/*",
+    "*://*.vertex.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -20,7 +26,11 @@
     {
       "matches": [
         "https://gemini.google.com/*",
-        "https://aistudio.google.com/*"
+        "https://aistudio.google.com/*",
+        "https://console.cloud.google.com/*",
+        "https://labs.google/*",
+        "https://labs.google.com/*",
+        "https://imagegeneration.vertex.ai/*"
       ],
       "js": ["intercept.js"],
       "run_at": "document_start",
@@ -29,7 +39,11 @@
     {
       "matches": [
         "https://gemini.google.com/*",
-        "https://aistudio.google.com/*"
+        "https://aistudio.google.com/*",
+        "https://console.cloud.google.com/*",
+        "https://labs.google/*",
+        "https://labs.google.com/*",
+        "https://imagegeneration.vertex.ai/*"
       ],
       "js": ["content.js"],
       "run_at": "document_start",

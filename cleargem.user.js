@@ -1,13 +1,17 @@
 // ==UserScript==
 // @name         ClearGem
 // @namespace    https://github.com/SysAdminDoc/ClearGem
-// @version      1.0.2
+// @version      1.1.0
 // @updateURL      https://raw.githubusercontent.com/SysAdminDoc/ClearGem/master/cleargem.user.js
 // @downloadURL    https://raw.githubusercontent.com/SysAdminDoc/ClearGem/master/cleargem.user.js
 // @description  Automatically removes visible Gemini AI watermarks via reverse alpha blending. Zero-click.
 // @author       SysAdminDoc
 // @match        https://gemini.google.com/*
 // @match        https://aistudio.google.com/*
+// @match        https://console.cloud.google.com/*
+// @match        https://labs.google/*
+// @match        https://labs.google.com/*
+// @match        https://imagegeneration.vertex.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      googleusercontent.com
@@ -24,7 +28,7 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
-    const VERSION = '1.0.2';
+    const VERSION = '1.1.0';
 
     // ── Embedded Alpha Maps (Float32Array as base64) ──
     const ALPHA_MAPS_B64 = {
@@ -47,17 +51,77 @@
     }
 
     // ── Watermark Position ──
-    function getWatermarkPosition(imgW, imgH) {
+    function getCandidatePositions(imgW, imgH) {
         const large = imgW > 1024 && imgH > 1024;
         const logoSize = large ? 96 : 48;
         const margin = large ? 64 : 32;
-        return {
-            x: imgW - margin - logoSize,
-            y: imgH - margin - logoSize,
-            width: logoSize,
-            height: logoSize,
-            logoSize
-        };
+        return [
+            { x: imgW - margin - logoSize, y: imgH - margin - logoSize, width: logoSize, height: logoSize, logoSize, corner: 'bottom-right' },
+            { x: margin,                   y: imgH - margin - logoSize, width: logoSize, height: logoSize, logoSize, corner: 'bottom-left'  },
+            { x: imgW - margin - logoSize, y: margin,                   width: logoSize, height: logoSize, logoSize, corner: 'top-right'    },
+            { x: margin,                   y: margin,                   width: logoSize, height: logoSize, logoSize, corner: 'top-left'     }
+        ];
+    }
+
+    // Score how well a corner matches the watermark pattern using NCC-like correlation.
+    // High correlation with the alpha map indicates the watermark is present at this position.
+    function scoreCorner(imageData, alphaMap, pos) {
+        const { x, y, width, height } = pos;
+        const imgW = imageData.width;
+        const imgH = imageData.height;
+
+        // Bounds check
+        if (x < 0 || y < 0 || x + width > imgW || y + height > imgH) return -1;
+
+        let sumProduct = 0;
+        let sumAlpha = 0;
+        let count = 0;
+
+        for (let row = 0; row < height; row++) {
+            for (let col = 0; col < width; col++) {
+                const alphaIdx = row * width + col;
+                const rawAlpha = alphaMap[alphaIdx];
+                if (rawAlpha < ALPHA_THRESHOLD) continue;
+
+                const imgIdx = ((y + row) * imgW + (x + col)) * 4;
+                // Watermark blends toward white (255). Measure how close each channel is to
+                // what we'd expect: brighter than surroundings proportional to alpha.
+                const r = imageData.data[imgIdx];
+                const g = imageData.data[imgIdx + 1];
+                const b = imageData.data[imgIdx + 2];
+                const brightness = (r + g + b) / 3 / 255;
+                // Expected: the higher the alpha, the closer to white the pixel should be
+                sumProduct += rawAlpha * brightness;
+                sumAlpha += rawAlpha;
+                count++;
+            }
+        }
+
+        if (count === 0 || sumAlpha === 0) return -1;
+        return sumProduct / sumAlpha;
+    }
+
+    function getWatermarkPosition(imgW, imgH, imageData) {
+        const candidates = getCandidatePositions(imgW, imgH);
+
+        // If no imageData provided, fall back to bottom-right (default Gemini position)
+        if (!imageData) return candidates[0];
+
+        const alphaMap = decodeAlphaMap(candidates[0].logoSize);
+        if (!alphaMap) return candidates[0];
+
+        let bestPos = candidates[0];
+        let bestScore = -1;
+
+        for (const pos of candidates) {
+            const score = scoreCorner(imageData, alphaMap, pos);
+            if (score > bestScore) {
+                bestScore = score;
+                bestPos = pos;
+            }
+        }
+
+        return bestPos;
     }
 
     // ── Reverse Alpha Blending ──
@@ -93,16 +157,17 @@
                 const h = img.naturalHeight;
                 if (w < 96 || h < 96) { URL.revokeObjectURL(img.src); resolve(blob); return; }
 
-                const pos = getWatermarkPosition(w, h);
-                const alphaMap = decodeAlphaMap(pos.logoSize);
-                if (!alphaMap) { URL.revokeObjectURL(img.src); resolve(blob); return; }
-
                 const canvas = document.createElement('canvas');
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0);
                 const imageData = ctx.getImageData(0, 0, w, h);
+
+                const pos = getWatermarkPosition(w, h, imageData);
+                const alphaMap = decodeAlphaMap(pos.logoSize);
+                if (!alphaMap) { URL.revokeObjectURL(img.src); resolve(blob); return; }
+
                 removeWatermark(imageData, alphaMap, pos);
                 ctx.putImageData(imageData, 0, 0);
 
@@ -167,19 +232,37 @@
         });
     }
 
-    // ── Toast ──
+    // ── Toast (Shadow DOM isolated to avoid style leaks on Google properties) ──
+    let toastHost = null;
+    let toastShadow = null;
+
+    function ensureToastHost() {
+        if (toastHost && document.body.contains(toastHost)) return;
+        toastHost = document.createElement('cleargem-toast-host');
+        toastHost.style.cssText = 'position:fixed;bottom:0;right:0;z-index:999999;pointer-events:none;';
+        toastShadow = toastHost.attachShadow({ mode: 'closed' });
+        const style = document.createElement('style');
+        style.textContent = `
+            :host { all: initial; position: fixed; bottom: 0; right: 0; z-index: 999999; pointer-events: none; }
+            .cleargem-toast {
+                position: fixed; bottom: 24px; right: 24px;
+                background: #1a1a2e; color: #cdd6f4; padding: 12px 20px;
+                border-radius: 8px; font-size: 13px; font-family: system-ui, sans-serif;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5); opacity: 0;
+                transition: opacity 0.3s ease; pointer-events: none;
+                border: 1px solid rgba(205,214,244,0.1);
+            }
+        `;
+        toastShadow.appendChild(style);
+        document.body.appendChild(toastHost);
+    }
+
     function showToast(msg) {
+        ensureToastHost();
         const el = document.createElement('div');
+        el.className = 'cleargem-toast';
         el.textContent = msg;
-        Object.assign(el.style, {
-            position: 'fixed', bottom: '24px', right: '24px', zIndex: '999999',
-            background: '#1a1a2e', color: '#cdd6f4', padding: '12px 20px',
-            borderRadius: '8px', fontSize: '13px', fontFamily: 'system-ui, sans-serif',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)', opacity: '0',
-            transition: 'opacity 0.3s ease', pointerEvents: 'none',
-            border: '1px solid rgba(205,214,244,0.1)'
-        });
-        document.body.appendChild(el);
+        toastShadow.appendChild(el);
         requestAnimationFrame(() => { el.style.opacity = '1'; });
         setTimeout(() => {
             el.style.opacity = '0';
@@ -403,16 +486,40 @@
         setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
     }
 
-    // ── MutationObserver ──
+    // ── MutationObserver + IntersectionObserver ──
+    // MutationObserver catches new DOM insertions; IntersectionObserver catches
+    // lazy-loaded images that enter the viewport (React virtualization, scroll).
     let scanTimeout;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((mutations) => {
         clearTimeout(scanTimeout);
         scanTimeout = setTimeout(scanImages, 150);
+
+        // Also observe any new images via IntersectionObserver
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                const imgs = node.tagName === 'IMG' ? [node] : (node.querySelectorAll ? Array.from(node.querySelectorAll('img')) : []);
+                for (const img of imgs) {
+                    intersectionObs.observe(img);
+                }
+            }
+        }
     });
+
+    const intersectionObs = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting && entry.target.tagName === 'IMG') {
+                processImgElement(entry.target);
+                intersectionObs.unobserve(entry.target);
+            }
+        }
+    }, { rootMargin: '200px' });
 
     function init() {
         if (document.body) {
             observer.observe(document.body, { childList: true, subtree: true });
+            // Observe all existing images
+            document.querySelectorAll('img').forEach(img => intersectionObs.observe(img));
             scanImages();
         } else {
             document.addEventListener('DOMContentLoaded', init);
