@@ -1,4 +1,4 @@
-// ClearGem v1.1.0 — MAIN World Image Processor
+// ClearGem v1.1.1 - MAIN World Image Processor
 // Fetches images via background SW relay (bypasses CORS via host_permissions).
 // Loads returned data URLs on canvas for watermark removal.
 'use strict';
@@ -8,8 +8,12 @@
     const ALPHA_THRESHOLD = 0.002;
     const MAX_ALPHA = 0.99;
     const LOGO_VALUE = 255;
+    const WATERMARK_CONFIDENCE_THRESHOLD = 0.35;
+    const WATERMARK_STRONG_CONFIDENCE = 0.75;
+    const WATERMARK_LIFT_THRESHOLD = 0.015;
+    const WATERMARK_MARGIN_THRESHOLD = 0.08;
 
-    // ── Settings (relayed from ISOLATED world via content.js) ──
+    // -- Settings (relayed from ISOLATED world via content.js) --
     let settings = {
         interceptDownload: true,
         interceptCopy: true,
@@ -63,42 +67,83 @@
         const { x, y, width, height } = pos;
         const imgW = imageData.width;
         const imgH = imageData.height;
-        if (x < 0 || y < 0 || x + width > imgW || y + height > imgH) return -1;
-        let sumProduct = 0;
+        if (x < 0 || y < 0 || x + width > imgW || y + height > imgH) {
+            return { ...pos, confidence: 0, lift: 0, sampleCount: 0 };
+        }
         let sumAlpha = 0;
+        let sumBrightness = 0;
+        let sumAlphaSq = 0;
+        let sumBrightnessSq = 0;
+        let sumProduct = 0;
+        let highBrightness = 0;
+        let highCount = 0;
+        let lowBrightness = 0;
+        let lowCount = 0;
         let count = 0;
         for (let row = 0; row < height; row++) {
             for (let col = 0; col < width; col++) {
                 const alphaIdx = row * width + col;
                 const rawAlpha = alphaMap[alphaIdx];
-                if (rawAlpha < ALPHA_THRESHOLD) continue;
+                if (rawAlpha < ALPHA_NOISE_FLOOR) continue;
                 const imgIdx = ((y + row) * imgW + (x + col)) * 4;
                 const r = imageData.data[imgIdx];
                 const g = imageData.data[imgIdx + 1];
                 const b = imageData.data[imgIdx + 2];
                 const brightness = (r + g + b) / 3 / 255;
-                sumProduct += rawAlpha * brightness;
                 sumAlpha += rawAlpha;
+                sumBrightness += brightness;
+                sumAlphaSq += rawAlpha * rawAlpha;
+                sumBrightnessSq += brightness * brightness;
+                sumProduct += rawAlpha * brightness;
+                if (rawAlpha >= 0.08) {
+                    highBrightness += brightness;
+                    highCount++;
+                } else if (rawAlpha <= 0.03) {
+                    lowBrightness += brightness;
+                    lowCount++;
+                }
                 count++;
             }
         }
-        if (count === 0 || sumAlpha === 0) return -1;
-        return sumProduct / sumAlpha;
+        if (count === 0 || highCount === 0 || lowCount === 0) {
+            return { ...pos, confidence: 0, lift: 0, sampleCount: count };
+        }
+        const covariance = count * sumProduct - sumAlpha * sumBrightness;
+        const alphaVariance = count * sumAlphaSq - sumAlpha * sumAlpha;
+        const brightnessVariance = count * sumBrightnessSq - sumBrightness * sumBrightness;
+        const correlation = alphaVariance > 0 && brightnessVariance > 0
+            ? covariance / Math.sqrt(alphaVariance * brightnessVariance)
+            : 0;
+        const lift = (highBrightness / highCount) - (lowBrightness / lowCount);
+        const confidence = Math.max(0, Math.min(1, correlation));
+        return { ...pos, confidence, lift, sampleCount: count };
     }
 
     function getWatermarkPosition(imgW, imgH, imageData) {
         const candidates = getCandidatePositions(imgW, imgH);
-        if (!imageData) return candidates[0];
+        if (!imageData) return null;
         const alphaMap = decodeAlphaMap(candidates[0].logoSize);
-        if (!alphaMap) return candidates[0];
-        let bestPos = candidates[0];
-        let bestScore = -1;
+        if (!alphaMap) return null;
+        let bestPos = null;
+        let secondConfidence = 0;
         for (const pos of candidates) {
-            const score = scoreCorner(imageData, alphaMap, pos);
-            if (score > bestScore) {
-                bestScore = score;
-                bestPos = pos;
+            const scored = scoreCorner(imageData, alphaMap, pos);
+            if (!bestPos || scored.confidence > bestPos.confidence) {
+                secondConfidence = bestPos ? bestPos.confidence : 0;
+                bestPos = scored;
+            } else if (scored.confidence > secondConfidence) {
+                secondConfidence = scored.confidence;
             }
+        }
+        if (!bestPos) return null;
+        const separated = bestPos.confidence >= WATERMARK_STRONG_CONFIDENCE ||
+            bestPos.confidence - secondConfidence >= WATERMARK_MARGIN_THRESHOLD;
+        if (
+            bestPos.confidence < WATERMARK_CONFIDENCE_THRESHOLD ||
+            bestPos.lift < WATERMARK_LIFT_THRESHOLD ||
+            !separated
+        ) {
+            return null;
         }
         return bestPos;
     }
@@ -152,7 +197,7 @@
         } catch { return url; }
     }
 
-    // ── Relay fetch via content script → background SW ──
+    // -- Relay fetch via content script -> background SW --
     const pendingFetches = new Map();
     let fetchIdCounter = 0;
 
@@ -184,7 +229,7 @@
         });
     }
 
-    // ── Load data URL as Image and process on canvas ──
+    // -- Load data URL as Image and process on canvas --
     function loadImage(src) {
         return new Promise((resolve, reject) => {
             const img = new Image();
@@ -207,6 +252,7 @@
 
         const imageData = ctx.getImageData(0, 0, w, h);
         const pos = getWatermarkPosition(w, h, imageData);
+        if (!pos) return null;
         const alphaMap = decodeAlphaMap(pos.logoSize);
         if (!alphaMap) return null;
 
@@ -215,7 +261,7 @@
         return canvas;
     }
 
-    // ── Toast (Shadow DOM isolated, settings-aware) ──
+    // -- Toast (Shadow DOM isolated, settings-aware) --
     let toastHost = null;
     let toastShadow = null;
 
@@ -267,7 +313,7 @@
         }, duration);
     }
 
-    // ── Core: fetch via SW relay, process, return blob ──
+    // -- Core: fetch via SW relay, process, return blob --
     async function fetchAndProcess(url) {
         const normalized = normalizeImageUrl(url);
         console.log('[ClearGem] Relay fetch:', normalized.substring(0, 80));
@@ -278,7 +324,7 @@
         return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     }
 
-    // ── Fetch Interception ──
+    // -- Fetch Interception --
     const originalFetch = window.fetch.bind(window);
     window.fetch = async function (...args) {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
@@ -299,7 +345,7 @@
         }
     };
 
-    // ── Download / Copy Button Interception ──
+    // -- Download / Copy Button Interception --
     function isDownloadButton(el) {
         if (!el) return false;
         const dlComponent = el.closest('download-generated-image-button');
@@ -426,7 +472,7 @@
         }
     }, true);
 
-    // ── In-Page Image Processing (MutationObserver) ──
+    // -- In-Page Image Processing (MutationObserver) --
     const processed = new WeakSet();
 
     async function processImgElement(img) {
@@ -498,5 +544,5 @@
     }
 
     init();
-    console.log('[ClearGem] v1.1.0 interceptor loaded');
+    console.log('[ClearGem] v1.1.1 interceptor loaded');
 })();

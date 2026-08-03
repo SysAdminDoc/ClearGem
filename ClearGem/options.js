@@ -1,4 +1,4 @@
-// ClearGem v1.1.0 — Options Page
+// ClearGem v1.1.1 - Options Page
 'use strict';
 
 const DEFAULTS = {

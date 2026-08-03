@@ -1,4 +1,4 @@
-// ClearGem v1.1.0 — Content Script (ISOLATED world)
+// ClearGem v1.1.1 - Content Script (ISOLATED world)
 // Relays fetch requests from MAIN world to background service worker.
 // Also relays settings from chrome.storage to MAIN world.
 'use strict';
@@ -65,5 +65,5 @@
         });
     });
 
-    console.log('[ClearGem Relay] v1.1.0 content relay loaded');
+    console.log('[ClearGem Relay] v1.1.1 content relay loaded');
 })();

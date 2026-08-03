@@ -1,8 +1,8 @@
 # ClearGem
 
-![Version](https://img.shields.io/badge/version-v1.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-Python-lightgrey)
+![Version](https://img.shields.io/badge/version-v1.1.1-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-JavaScript-lightgrey)
 
-Automatically removes visible watermarks from Google Gemini AI-generated images. Available as a Tampermonkey userscript and a Chrome/Firefox extension. Zero-click — just install and forget.
+Automatically removes visible watermarks from Google Gemini AI-generated images. Available as a Tampermonkey userscript and a Chrome/Firefox extension. Zero-click - just install and forget.
 
 <table>
 <tr>
@@ -29,38 +29,37 @@ ClearGem reverses this mathematically to reconstruct the original pixels:
 original_pixel = (watermarked_pixel - alpha * 255) / (1 - alpha)
 ```
 
-Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpainting, no server calls, no quality loss — pixel-perfect reconstruction with 99.9% accuracy (bounded only by 8-bit quantization).
+Pre-calibrated alpha maps (48x48 and 96x96) are embedded directly. No AI inpainting, no server calls, no quality loss - pixel-perfect reconstruction with 99.9% accuracy (bounded only by 8-bit quantization).
 
 ## Features
 
-- **Zero-click** — images are cleaned automatically as they appear in chat
-- **Download interception** — Gemini's download button delivers clean images
-- **Copy interception** — Gemini's copy button copies clean images to clipboard
-- **Auto-detection** — picks 48x48 or 96x96 watermark size based on image dimensions
-- **Corner auto-detect** — scans all four corners to find the watermark, handles edge cases where Gemini places it in non-default positions
-- **Multi-site support** — works on Gemini, AI Studio, Vertex AI, and Google Labs
-- **100% client-side** — nothing leaves your browser
-- **Toast notifications** — subtle Shadow DOM-isolated confirmation when images are cleaned
+- **Zero-click** - images are cleaned automatically as they appear in chat
+- **Download interception** - Gemini's download button delivers clean images
+- **Copy interception** - Gemini's copy button copies clean images to clipboard
+- **Auto-detection** - picks 48x48 or 96x96 watermark size based on image dimensions
+- **Corner auto-detect** - scans all four corners to find the watermark, handles edge cases where Gemini places it in non-default positions
+- **Confidence gating** - verifies template correlation before cleaning so non-watermarked images are left untouched
+- **Multi-site support** - works on Gemini, AI Studio, Vertex AI, and Google Labs
+- **100% client-side** - nothing leaves your browser
+- **Toast notifications** - subtle Shadow DOM-isolated confirmation when images are cleaned
 
 ## Install
 
 ### Userscript (Tampermonkey / Greasemonkey)
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (or any userscript manager)
-2. Download [`cleargem.user.js`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release — Tampermonkey will prompt to install
-3. Navigate to [gemini.google.com](https://gemini.google.com) — active immediately
+2. Download [`cleargem.user.js`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release - Tampermonkey will prompt to install
+3. Navigate to [gemini.google.com](https://gemini.google.com) - active immediately
 
 ### Chrome Extension
 
-1. Download [`ClearGem-v1.1.0.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
+1. Download [`ClearGem-v1.1.1.zip`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release and unzip
 2. Go to `chrome://extensions`, enable **Developer mode**
 3. Click **Load unpacked** and select the unzipped folder
 
-Or drag the `.crx` file onto the extensions page.
-
 ### Firefox Extension
 
-1. Download [`ClearGem-v1.1.0.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
+1. Download [`ClearGem-v1.1.1.xpi`](https://github.com/SysAdminDoc/ClearGem/releases/latest) from the latest release
 2. Go to `about:addons`, click the gear icon, select **Install Add-on From File**
 
 ## Compatibility
@@ -77,7 +76,7 @@ Userscript works with Tampermonkey MV3 (`@inject-into content`). Extension is Ma
 
 ## Limitations
 
-- Removes the **visible** watermark only. Does **not** remove [SynthID](https://deepmind.google/technologies/synthid/) — Google's invisible steganographic watermark embedded at the pixel generation level. That requires diffusion model re-processing and is a fundamentally different problem.
+- Removes the **visible** watermark only. Does **not** remove [SynthID](https://deepmind.google/technologies/synthid/) - Google's invisible steganographic watermark embedded at the pixel generation level. That requires diffusion model re-processing and is a fundamentally different problem.
 - If Google changes the watermark pattern, position, or alpha values, the embedded alpha maps will need updating.
 
 ## Credits

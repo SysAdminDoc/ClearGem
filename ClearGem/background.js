@@ -1,4 +1,4 @@
-// ClearGem v1.1.0 — Background Service Worker
+// ClearGem v1.1.1 - Background Service Worker
 // Fetches images using host_permissions (bypasses CORS entirely).
 // Returns base64 data URL to content script.
 'use strict';
@@ -33,4 +33,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // async sendResponse
 });
 
-console.log('[ClearGem BG] Service worker started (v1.1.0)');
+console.log('[ClearGem BG] Service worker started (v1.1.1)');
